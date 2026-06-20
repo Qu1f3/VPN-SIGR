@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.env
+
+# Claves y certificados se generarán localmente en una etapa posterior.
+*.key
+*.pem

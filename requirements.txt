@@ -1,0 +1,10 @@
+# Criptografía de V1 y certificados de una etapa posterior.
+# Una sola biblioteca cubrirá X25519, HKDF, ChaCha20-Poly1305 y X.509.
+cryptography>=44.0
+
+# API REST de V1 (la implementará el integrante responsable de Features).
+fastapi>=0.115
+uvicorn[standard]>=0.34
+
+# Pruebas automatizadas de todos los módulos.
+pytest>=8.3
