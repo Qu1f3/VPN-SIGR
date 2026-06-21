@@ -21,10 +21,18 @@ _AUTH_LABELS = {
     "server": b"academic-vpn-v1/server-authentication"
 }
 
+DIRECTIONAL_KEY_MATERIAL_SIZE = SESSION_KEY_SIZE * 2
+DIRECTIONAL_HKDF_INFO = (b"academic-vpn-v1/directional-session-keys")
+
 @dataclass(frozen=True, slots=True)
 class EphemeralKeyPair:
     private_key: X25519PrivateKey
     public_key_bytes: bytes
+    
+@dataclass(frozen=True, slots=True)
+class DirectionalSessionKeys:
+    client_to_server_key: bytes
+    server_to_client_key: bytes
     
 def generate_ephemeral_keypair() -> EphemeralKeyPair:
     private_key = X25519PrivateKey.generate()
@@ -117,3 +125,43 @@ def verify_auth_tag(psk: bytes, transcript: bytes, role:str, received_tag: bytes
         return False
     
     return True
+
+def derive_directional_session_keys(
+    own_private_key: X25519PrivateKey,
+    peer_public_key_bytes: bytes,
+    transcript: bytes,
+    psk: bytes
+    ) -> DirectionalSessionKeys:
+    
+    if len(peer_public_key_bytes) != X25519_KEY_SIZE:
+        raise ValueError("La clave pública remota debe medir 32 bytes")
+    
+    if not isinstance(transcript, bytes) or not transcript:
+        raise ValueError("El transcript debe contener bytes")
+    
+    if not isinstance(psk, bytes):
+        raise ValueError("La PSK debe ser de tipo bytes")
+    
+    if len(psk) != PSK_SIZE:
+        raise ValueError("La PSK debe medir exactamente 32 bytes")
+    
+    peer_public_key = X25519PublicKey.from_public_bytes(peer_public_key_bytes)
+    shared_secret = own_private_key.exchange(peer_public_key)
+    
+    transcript_hasher = hashes.Hash(hashes.SHA256())
+    transcript_hasher.update(transcript)
+    transcript_hash = transcript_hasher.finalize()
+    
+    key_derivation = HKDF(
+        algorithm=hashes.SHA256(),
+        length=DIRECTIONAL_KEY_MATERIAL_SIZE,
+        salt=transcript_hash,
+        info = DIRECTIONAL_HKDF_INFO
+    )
+    
+    key_material = key_derivation.derive(shared_secret + psk)
+    
+    return DirectionalSessionKeys(
+        client_to_server_key=key_material[:SESSION_KEY_SIZE],
+        server_to_client_key=key_material[SESSION_KEY_SIZE:]
+    )
