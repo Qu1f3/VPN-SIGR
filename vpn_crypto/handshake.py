@@ -2,14 +2,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.asymmetric.x25519 import (X25519PrivateKey, X25519PublicKey)
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
+import secrets
+from cryptography.exceptions import InvalidSignature
+
 X25519_KEY_SIZE = 32
 SESSION_KEY_SIZE = 32
 HKDF_INFO = b"academic-vpn-v1/x25519-session-key"
+
+PSK_SIZE = 32
+AUTH_TAG_SIZE = 32
+_AUTH_LABELS = {
+    "client": b"academic-vpn-v1/client-authentication",
+    "server": b"academic-vpn-v1/server-authentication"
+}
 
 @dataclass(frozen=True, slots=True)
 class EphemeralKeyPair:
@@ -62,3 +72,48 @@ def derive_session_key( own_private_key: X25519PrivateKey, peer_public_key_bytes
     )
     
     return key_derivation.derive(shared_secret)
+
+def generate_psk() -> bytes:
+    return secrets.token_bytes(PSK_SIZE)
+
+def _build_authenticator(psk: bytes, transcript: bytes, role: str) -> hmac.HMAC:
+    
+    if not isinstance(psk, bytes):
+        raise TypeError("La PSK debe ser de tipo bytes")
+    
+    if len(psk) != PSK_SIZE:
+        raise ValueError("La PSK debe medir exactamente 32 bytes")
+    
+    if not isinstance(transcript, bytes) or not transcript:
+        raise ValueError("El transcript debe contener bytes")
+    
+    if role not in _AUTH_LABELS:
+        raise ValueError("El rol debe ser 'client' o 'server'")
+    
+    authenticator = hmac.HMAC(psk, hashes.SHA256())
+    
+    authenticator.update(_AUTH_LABELS[role])
+    authenticator.update(len(transcript).to_bytes(4, "big"))
+    authenticator.update(transcript)
+    
+    return authenticator
+
+def create_auth_tag(psk: bytes, transcript: bytes, role:str) -> bytes:
+    authenticator = _build_authenticator(psk, transcript, role)
+    return authenticator.finalize()
+
+def verify_auth_tag(psk: bytes, transcript: bytes, role:str, received_tag: bytes) -> bool:
+    if not isinstance(received_tag, bytes):
+        return False
+    
+    if len(received_tag) != AUTH_TAG_SIZE:
+        return False
+    
+    authenticator = _build_authenticator(psk, transcript, role)
+    
+    try:
+        authenticator.verify(received_tag)
+    except InvalidSignature:
+        return False
+    
+    return True
