@@ -1,5 +1,9 @@
-import json
 import time
+from protocol.serializer import generate_nonce, serialize_packet, deserialize_packet
+from core.sequence import SequenceManager
+
+sequence_manager = SequenceManager()
+
 
 
 class PacketType:
@@ -36,22 +40,33 @@ class Status:
 def create_packet(
     packet_type: str,
     payload: dict | None = None,
-    session_id: str | None = None
+    session_id: bytes | None = None
 ) -> dict:
+    
+    sequence_number = sequence_manager.next_send()
+
+    nonce = generate_nonce(
+        sequence_number
+    )
 
     return {
         "type": packet_type,
         "session_id": session_id,
         "timestamp": int(time.time()),
-        "payload": payload or {}
+        "nonce": nonce,
+        "sequence_number": sequence_number,
+        "payload": payload or {},
+        "tag": None
     }
 
 
-def encode_packet(packet: dict) -> bytes:
 
-    return json.dumps(packet).encode("utf-8")
+def encode_packet(packet: dict) -> bytes:
+    
+    return serialize_packet(packet)
+
 
 
 def decode_packet(data: bytes) -> dict:
 
-    return json.loads(data.decode("utf-8"))
+    return deserialize_packet(data)

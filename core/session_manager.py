@@ -1,4 +1,5 @@
 import uuid
+import secrets
 from datetime import datetime
 
 
@@ -8,7 +9,7 @@ sessions = {}
 
 def create_session(client_address):
 
-    session_id = str(uuid.uuid4())
+    session_id = secrets.token_bytes(16)
 
 
     sessions[session_id] = {
@@ -27,7 +28,6 @@ def create_session(client_address):
 
 
     return session_id
-
 
 
 def get_session(session_id):

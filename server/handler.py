@@ -21,6 +21,7 @@ def handle_packet(packet, client_address):
         return handle_handshake(packet, client_address)
 
 
+
     elif packet_type == PacketType.DATA:
 
         return handle_data(packet, client_address)
@@ -67,6 +68,10 @@ def handle_handshake(packet, client_address):
     )
 
     print(
+        f"[SESSION SIZE]: {len(session_id)} bytes"
+    )
+
+    print(
         f"[IP] asignada: {virtual_ip}"
     )
 
@@ -82,6 +87,8 @@ def handle_handshake(packet, client_address):
         },
 
         session_id=session_id
+
+        
     )
 
 

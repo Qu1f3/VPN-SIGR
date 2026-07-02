@@ -1,12 +1,5 @@
-"""Servidor UDP mínimo para la primera prueba del proyecto.
-
-El servidor recibe texto sin cifrar y responde con un ACK. Esta conducta es
-deliberadamente sencilla y será reemplazada por paquetes estructurados cuando
-el equipo integre el protocolo.
-"""
-
 from __future__ import annotations
-from protocol.protocol import *
+from protocol.protocol import PacketType, create_packet, encode_packet, decode_packet
 from server.handler import *
 
 import argparse
@@ -17,7 +10,7 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 51820
 MAX_DATAGRAM_SIZE = 65535
 
-Address: TypeAlias = tuple[str, int]
+Address: TypeAlias = tuple[str, int] ######
 
 def create_server_socket(host: str, port: int) -> socket.socket:
     """Crea un socket UDP y lo enlaza a la IP y al puerto indicados."""
@@ -25,6 +18,7 @@ def create_server_socket(host: str, port: int) -> socket.socket:
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         server_socket.bind((host, port))
+        server_socket.settimeout(1.0)
     except Exception:
         server_socket.close()
         raise
@@ -61,6 +55,8 @@ def receive_and_reply(server_socket: socket.socket):
             )
         )
 
+
+    print(response_packet)
     server_socket.sendto(response, client_address)
     return data, client_address
 
@@ -74,7 +70,10 @@ def run_server(host: str, port: int, once: bool = False) -> None:
         print("Presiona Ctrl+C para detenerlo.")
 
         while True:
-            receive_and_reply(server_socket)
+            try:
+                receive_and_reply(server_socket)
+            except socket.timeout:
+                continue
             if once:
                 break
 

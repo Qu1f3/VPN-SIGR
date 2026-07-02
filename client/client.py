@@ -1,12 +1,5 @@
-"""Cliente UDP mínimo para la primera prueba del proyecto.
-
-Todavía no hay handshake, cifrado ni formato de paquetes. El objetivo de este
-módulo es comprobar únicamente que un datagrama puede viajar del cliente al
-servidor y que la respuesta puede regresar.
-"""
-
 from __future__ import annotations
-from protocol.protocol import *
+from protocol.protocol import PacketType, create_packet, encode_packet, decode_packet
 
 
 import argparse
@@ -20,11 +13,10 @@ DEFAULT_TIMEOUT_SECONDS = 3.0
 
 
 def send_message( host: str, port: int, message: str, timeout: float = DEFAULT_TIMEOUT_SECONDS,) -> str:
-    
-    # payload = message.encode("utf-8")
+    # Paquete de Handshake
     packet = create_packet(PacketType.HANDSHAKE, {"version": "1.0"})
     payload = encode_packet(packet)
-
+    # AF_INET = IPv4, SOCK_DGRAM = UDP
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client_socket:
         # UDP no establece una conexión. Este timeout evita esperar para siempre
         # cuando el servidor está apagado o el puerto está bloqueado.
@@ -33,11 +25,9 @@ def send_message( host: str, port: int, message: str, timeout: float = DEFAULT_T
         
         response, server_address = client_socket.recvfrom(65535)
 
-        # payload_data = response_packet.get("payload", {})
         response_packet = decode_packet(response)
         session_id = response_packet.get("session_id")
         virtual_ip = response_packet["payload"].get("virtual_ip")
-
 
 
         print(f"Respuesta de {server_address[0]}:{server_address[1]}:")
@@ -46,6 +36,7 @@ def send_message( host: str, port: int, message: str, timeout: float = DEFAULT_T
         print(f"Session ID: {session_id}")
         print(f"Virtual IP: {virtual_ip}")
 
+    # Paquete de AUTH
         auth_packet = create_packet(
             PacketType.AUTH,
             {
@@ -71,6 +62,7 @@ def send_message( host: str, port: int, message: str, timeout: float = DEFAULT_T
             print("Autenticación fallida. No se puede enviar datos.")
             return
 
+    # Paquete de DATA
         data_packet = create_packet(
             PacketType.DATA,
             {
@@ -78,7 +70,7 @@ def send_message( host: str, port: int, message: str, timeout: float = DEFAULT_T
                 "destination_ip": "10.8.0.1",
                 "data": "Hola desde el tunel VPN"
             },
-            session_id=session_id
+            session_id=session_id,
         )
 
         client_socket.sendto(
@@ -92,9 +84,6 @@ def send_message( host: str, port: int, message: str, timeout: float = DEFAULT_T
         print(decode_packet(data_response))
 
         return response_packet
-    # decoded_response = response.decode("utf-8")
-    # print(f"Respuesta de {server_address[0]}:{server_address[1]}: {decoded_response}")
-    # return decoded_response
 
 
 def parse_args() -> argparse.Namespace:
