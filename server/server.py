@@ -1,11 +1,6 @@
-"""Servidor UDP mínimo para la primera prueba del proyecto.
-
-El servidor recibe texto sin cifrar y responde con un ACK. Esta conducta es
-deliberadamente sencilla y será reemplazada por paquetes estructurados cuando
-el equipo integre el protocolo.
-"""
-
 from __future__ import annotations
+from protocol.protocol import PacketType, create_packet, encode_packet, decode_packet
+from server.handler import *
 
 import argparse
 import socket
@@ -15,7 +10,7 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 51820
 MAX_DATAGRAM_SIZE = 65535
 
-Address: TypeAlias = tuple[str, int]
+Address: TypeAlias = tuple[str, int] ######
 
 def create_server_socket(host: str, port: int) -> socket.socket:
     """Crea un socket UDP y lo enlaza a la IP y al puerto indicados."""
@@ -23,28 +18,45 @@ def create_server_socket(host: str, port: int) -> socket.socket:
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         server_socket.bind((host, port))
+        server_socket.settimeout(1.0)
     except Exception:
         server_socket.close()
         raise
     return server_socket
 
 
-def receive_and_reply(server_socket: socket.socket) -> tuple[bytes, Address]:
-    """Atiende exactamente un datagrama y devuelve sus bytes y remitente."""
-
+def receive_and_reply(server_socket: socket.socket): 
     data, client_address = server_socket.recvfrom(MAX_DATAGRAM_SIZE)
 
     # Para esta prueba pedagógica esperamos UTF-8. Más adelante el protocolo
     # transportará bytes cifrados y no intentaremos interpretarlos como texto.
     try:
-        message = data.decode("utf-8")
-    except UnicodeDecodeError:
-        response = b"ERROR: el mensaje no es UTF-8"
-        print(f"Datagrama no válido recibido de {client_address[0]}:{client_address[1]}")
-    else:
-        response = f"ACK: {message}".encode("utf-8")
-        print(f"Recibido de {client_address[0]}:{client_address[1]}: {message}")
+        packet = decode_packet(data)
 
+        print("\nPaquete recibido:")
+        print(packet)
+
+        response_packet = handle_packet(packet, client_address)
+
+        response = encode_packet(response_packet)
+    
+    except Exception as error:
+
+        print("Error:", error)
+    
+        print(f"Error al decodificar el paquete: {socket.error}")
+
+        response = encode_packet(
+            create_packet(
+                PacketType.ERROR,
+                {
+                    "message": "Paquete invalido"
+                }
+            )
+        )
+
+
+    print(response_packet)
     server_socket.sendto(response, client_address)
     return data, client_address
 
@@ -58,7 +70,10 @@ def run_server(host: str, port: int, once: bool = False) -> None:
         print("Presiona Ctrl+C para detenerlo.")
 
         while True:
-            receive_and_reply(server_socket)
+            try:
+                receive_and_reply(server_socket)
+            except socket.timeout:
+                continue
             if once:
                 break
 

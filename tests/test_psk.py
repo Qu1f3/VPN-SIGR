@@ -2,6 +2,7 @@ import unittest
 
 from vpn_crypto.handshake import(
     AUTH_TAG_SIZE,
+    LAB_PSK,
     create_auth_tag,
     create_handshake_transcript,
     generate_ephemeral_keypair,
@@ -20,6 +21,9 @@ class PskAuthenticationTest(unittest.TestCase):
             client_keys.public_key_bytes,
             server_keys.public_key_bytes
         )
+        
+        def test_lab_psk_has_valid_size(self) -> None:
+            self.assertEqual(len(LAB_PSK), 32)
         
     def test_client_and_server_authentication(self) -> None:
         psk = generate_psk()
