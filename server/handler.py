@@ -1,3 +1,5 @@
+from firewall.killswitch import kill_switch
+
 from protocol.protocol import *
 from core.session_manager import (
     authenticate_session,
@@ -5,6 +7,7 @@ from core.session_manager import (
     get_handshake_transcript,
     get_session,
     get_session_keys,
+    remove_session,
     set_handshake_transcript,
     set_session_keys,
     set_virtual_ip,
@@ -199,13 +202,26 @@ def handle_data(packet, client_address):
 
 def handle_disconnect(packet, client_address):
 
+    session_id = packet.get("session_id")
+
+    if remove_session(session_id):
+        print(f"[SESSION] Eliminada: {session_id}")
+    else:
+        print(f"[SESSION] No encontrada: {session_id}")
+
+    kill_switch.enable()
+    kill_switch.block_traffic()
+
     print(f"[DISCONNECT] Cliente {client_address}")
+    print(f"[SESSION] Eliminada: {session_id}")
 
     return create_packet(
         PacketType.DISCONNECT,
         {
-            "status": Status.OK
-        }
+            "status": Status.OK,
+            "message": "Sesion finalizada correctamente."
+        },
+        session_id=session_id
     )
 
 def handle_auth(packet, client_address):
@@ -265,6 +281,11 @@ def handle_auth(packet, client_address):
 
     if USERS.get(username) == password:
         authenticate_session(session_id)
+
+        # La VPN ya está establecida
+        kill_switch.allow_traffic()
+        kill_switch.disable()
+
         print(f"[AUTH] Usuario autenticado: {username}")
 
         return create_packet(

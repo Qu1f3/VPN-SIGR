@@ -138,6 +138,26 @@ def send_message( host: str, port: int, message: str, timeout: float = DEFAULT_T
         print("\nRespuesta DATA: ")
         print(decode_packet(data_response))
 
+        disconnect_packet = create_packet(
+            PacketType.DISCONNECT,
+            {},
+            session_id=session_id
+        )
+
+        client_socket.sendto(
+            encode_packet(disconnect_packet),
+            (host, port)
+        )
+
+        try:
+            disconnect_response, _ = client_socket.recvfrom(65535)
+
+            print("\nRespuesta DISCONNECT:")
+            print(decode_packet(disconnect_response))
+
+        except socket.timeout:
+            print("No se recibió respuesta al DISCONNECT.")
+
         return response_packet
 
 def parse_args() -> argparse.Namespace:
