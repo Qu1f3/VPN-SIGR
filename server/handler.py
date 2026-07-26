@@ -1,7 +1,5 @@
 from firewall.killswitch import kill_switch
 #
-from tunneling.tunnel_manager import get_tun
-# 
 
 from protocol.protocol import *
 from core.session_manager import (

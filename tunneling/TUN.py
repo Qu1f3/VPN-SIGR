@@ -1,95 +1,15 @@
-from tunneling.tun_linux import LinuxTun
-from tunneling import network
+# tunneling/TUN.py
+"""
+Elige automaticamente la implementacion del Adapter segun el sistema
+operativo -- Windows usa Wintun (tun_windows.py), Linux usa
+/dev/net/tun (tun_linux.py). El resto del proyecto solo importa
+'from tunneling.TUN import Adapter' y nunca necesita saber cual es.
+"""
+import platform
 
+if platform.system() == "Windows":
+    from tunneling.tun_windows import Adapter
+else:
+    from tunneling.tun_linux import Adapter
 
-class Adapter:
-
-
-    def __init__(self):
-
-        self.device = LinuxTun()
-
-        self.name = None
-        self.ip = None
-
-
-
-    def create(
-        self,
-        name="VPN-SIGR",
-        tunnel_type="VPN"
-    ):
-
-        self.name = self.device.create(
-            name
-        )
-
-        print(
-            f"TUN creada: {self.name}"
-        )
-
-
-    def set_ip(
-        self,
-        ip,
-        prefix=24
-    ):
-
-        network.set_ip(
-            self.name,
-            ip,
-            prefix
-        )
-
-        self.ip = ip
-
-
-
-    def enable_internet_sharing(self, interface="enp0s3"):
-
-        network.enable_ip_forwarding()
-
-        network.enable_nat(
-            "10.8.0.0/24",
-            interface
-        )
-
-
-    def start_session(self):
-
-        pass
-
-
-
-    def read_packet(self):
-
-        return self.device.read()
-
-
-
-    def write_packet(self, packet):
-
-        self.device.write(packet)
-
-
-
-    def close(self):
-
-        self.device.close()
-
-
-
-    def __enter__(self):
-
-        return self
-
-
-
-    def __exit__(
-        self,
-        a,
-        b,
-        c
-    ):
-
-        self.close()
+__all__ = ["Adapter"]
