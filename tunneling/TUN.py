@@ -46,10 +46,11 @@ class Adapter:
 
 
     def enable_internet_sharing(self, interface="enp0s3"):
+
         network.enable_ip_forwarding()
 
-        network.create_nat(
-            self.ip_address,
+        network.enable_nat(
+            "10.8.0.0/24",
             interface
         )
 

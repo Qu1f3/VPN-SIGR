@@ -52,3 +52,10 @@ def enable_nat(
         "-j",
         "MASQUERADE"
     ])
+
+def create_nat(internal_prefix):
+
+    enable_nat(
+        internal_prefix,
+        "enp0s3"
+    )
