@@ -11,8 +11,8 @@ with Adapter() as adapter:
     # a internet en este servidor (revísalo con 'Get-NetAdapter' en
     # PowerShell — en VPS suele llamarse "Ethernet" o "Ethernet0").
     # adapter.enable_internet_sharing()
-    adapter.enable_forwarding()
-    adapter.enable_nat()
+    adapter.enable_internet_sharing("enp0s3")
+    # adapter.enable_nat()
     print("NAT e IP forwarding habilitados.")
 
     adapter.start_session()
