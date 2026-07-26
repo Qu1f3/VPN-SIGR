@@ -10,16 +10,21 @@ with Adapter() as adapter:
     # OJO: cambia "Ethernet" por el nombre real de tu interfaz de salida
     # a internet en este servidor (revísalo con 'Get-NetAdapter' en
     # PowerShell — en VPS suele llamarse "Ethernet" o "Ethernet0").
-    adapter.enable_internet_sharing()
+    # adapter.enable_internet_sharing()
+    adapter.enable_forwarding()
+    adapter.enable_nat()
     print("NAT e IP forwarding habilitados.")
 
     adapter.start_session()
     print("Sesión iniciada. Escuchando paquetes (Ctrl+C para salir)...")
 
     try:
-        for packet in adapter.read_loop():
-            print(f"Paquete recibido: {len(packet)} bytes")
-            # Aquí es donde, en el loop real, cifrarías 'packet' y lo
-            # mandarías por tu socket UDP/TCP hacia el peer VPN.
+        while True:
+            packet = adapter.read_packet()
+
+            if packet:
+                print(
+                    f"Paquete recibido: {len(packet)} bytes"
+                )
     except KeyboardInterrupt:
         print("Cerrando adaptador...")
