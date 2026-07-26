@@ -1,21 +1,20 @@
 import subprocess
 
 
-
 def run(cmd):
-
-    subprocess.run(
-        cmd,
-        check=True
-    )
+    subprocess.run(cmd, check=True)
 
 
+def enable_ip_forwarding():
 
-def set_ip(
-    interface,
-    ip,
-    prefix
-):
+    run([
+        "sysctl",
+        "-w",
+        "net.ipv4.ip_forward=1"
+    ])
+
+
+def set_ip(interface, ip, prefix):
 
     run([
         "ip",
@@ -26,7 +25,6 @@ def set_ip(
         interface
     ])
 
-
     run([
         "ip",
         "link",
@@ -36,25 +34,10 @@ def set_ip(
     ])
 
 
-
-
-def enable_forwarding():
-
-    run([
-        "sysctl",
-        "-w",
-        "net.ipv4.ip_forward=1"
-    ])
-
-
-
-
-def create_nat(
-    ip
+def enable_nat(
+    vpn_network,
+    internet_interface
 ):
-
-    network = ip.rsplit(".",1)[0]+".0/24"
-
 
     run([
         "iptables",
@@ -63,7 +46,9 @@ def create_nat(
         "-A",
         "POSTROUTING",
         "-s",
-        network,
+        vpn_network,
+        "-o",
+        internet_interface,
         "-j",
         "MASQUERADE"
     ])

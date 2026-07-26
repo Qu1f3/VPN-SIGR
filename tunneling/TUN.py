@@ -45,14 +45,13 @@ class Adapter:
 
 
 
-    def enable_internet_sharing(self):
-
-        network.enable_forwarding()
+    def enable_internet_sharing(self, interface="enp0s3"):
+        network.enable_ip_forwarding()
 
         network.create_nat(
-            self.ip
+            self.ip_address,
+            interface
         )
-
 
 
     def start_session(self):

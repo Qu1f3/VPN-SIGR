@@ -10,7 +10,7 @@ with Adapter() as adapter:
     # OJO: cambia "Ethernet" por el nombre real de tu interfaz de salida
     # a internet en este servidor (revísalo con 'Get-NetAdapter' en
     # PowerShell — en VPS suele llamarse "Ethernet" o "Ethernet0").
-    adapter.enable_internet_sharing("VPN-SIGR")
+    adapter.enable_internet_sharing()
     print("NAT e IP forwarding habilitados.")
 
     adapter.start_session()
