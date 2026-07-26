@@ -23,7 +23,7 @@ class TunnelServer:
         # Ruta explícita hacia el pool completo de IPs virtuales de los
         # clientes VPN — sin esto, set_ip con /32 no sabría que el resto
         # del pool debe entregarse por esta interfaz.
-        self.adapter.add_pool_route("10.8.0.0/24")
+        ### self.adapter.add_pool_route("10.8.0.0/24")
 
         self.adapter.enable_internet_sharing()
 
