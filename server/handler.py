@@ -1,4 +1,7 @@
 from firewall.killswitch import kill_switch
+#
+from tunneling.tunnel_manager import get_tun
+# 
 
 from protocol.protocol import *
 from core.session_manager import (
@@ -21,12 +24,12 @@ from vpn_crypto.handshake import (
     verify_auth_tag,
 )
 from core.ip_manager import assign_ip
-from core.users import USERS
+from core.users import verify_credentials
 
 from cryptography.exceptions import InvalidTag
 from vpn_crypto.cipher import decrypt_packet_payload
 
-def handle_packet(packet, client_address):
+def handle_packet(packet, client_address, tunnel):
     #Procesa los paquetes recibidos por el servidor VPN.
     packet_type = packet.get("type")
     print(f"[HANDLER] Procesando: {packet_type}")
@@ -35,7 +38,7 @@ def handle_packet(packet, client_address):
         return handle_handshake(packet, client_address)
 
     elif packet_type == PacketType.DATA:
-        return handle_data(packet, client_address)
+        return handle_data(packet, client_address, tunnel)
     
     elif packet_type == PacketType.AUTH:
         return handle_auth(packet, client_address)
@@ -130,7 +133,7 @@ def handle_handshake(packet, client_address):
         session_id=session_id 
     )
 
-def handle_data(packet, client_address):
+def handle_data(packet, client_address, tunnel):
 
     session_id = packet.get("session_id")
     session = get_session(session_id)
@@ -174,6 +177,21 @@ def handle_data(packet, client_address):
             session_keys.client_to_server_key,
         )
 
+        print(
+            f"[DATA DESCIFRADO] {len(plaintext_payload)} bytes"
+        )
+
+        # Una sola escritura al TUN. Antes se escribía dos veces (aquí
+        # y de nuevo más abajo vía get_tun()), duplicando cada paquete
+        # que entra por la VPN.
+        print(
+            "[TUN] Inyectando paquete al adaptador"
+        )
+
+        tunnel.write_packet(
+            plaintext_payload
+        )
+
     except InvalidTag:
 
         return create_packet(
@@ -186,10 +204,6 @@ def handle_data(packet, client_address):
 
     print(
         f"[DATA] Datos cifrados recibidos de {client_address}"
-    )
-
-    print(
-        f"[DATA DESCIFRADO] {plaintext_payload}"
     )
 
     return create_packet(
@@ -279,7 +293,7 @@ def handle_auth(packet, client_address):
             session_id=session_id
         )
 
-    if USERS.get(username) == password:
+    if verify_credentials(username, password):
         authenticate_session(session_id)
 
         # La VPN ya está establecida

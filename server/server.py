@@ -1,9 +1,18 @@
 from __future__ import annotations
+
+from dotenv import load_dotenv
+load_dotenv()
+
 from protocol.protocol import PacketType, create_packet, encode_packet, decode_packet
 from server.handler import *
+#
+from server.tunnel_server import TunnelServer
+from server.tunnel_forwarder import TunnelServerForwarder
+#
 
 import argparse
 import socket
+import threading
 from typing import TypeAlias
 
 DEFAULT_HOST = "127.0.0.1"
@@ -25,7 +34,7 @@ def create_server_socket(host: str, port: int) -> socket.socket:
     return server_socket
 
 
-def receive_and_reply(server_socket: socket.socket): 
+def receive_and_reply(server_socket: socket.socket, tunnel: TunnelServer) -> tuple[bytes, Address]: 
     data, client_address = server_socket.recvfrom(MAX_DATAGRAM_SIZE)
 
     # Para esta prueba pedagógica esperamos UTF-8. Más adelante el protocolo
@@ -36,7 +45,7 @@ def receive_and_reply(server_socket: socket.socket):
         print("\nPaquete recibido:")
         print(packet)
 
-        response_packet = handle_packet(packet, client_address)
+        response_packet = handle_packet(packet, client_address, tunnel)
 
         response = encode_packet(response_packet)
     
@@ -46,14 +55,14 @@ def receive_and_reply(server_socket: socket.socket):
     
         print(f"Error al decodificar el paquete: {socket.error}")
 
-        response = encode_packet(
-            create_packet(
-                PacketType.ERROR,
-                {
-                    "message": "Paquete invalido"
-                }
-            )
+        response_packet = create_packet(
+            PacketType.ERROR,
+            {
+                "message": "Paquete invalido"
+            }
         )
+
+        response = encode_packet(response_packet)
 
 
     print(response_packet)
@@ -64,14 +73,28 @@ def receive_and_reply(server_socket: socket.socket):
 def run_server(host: str, port: int, once: bool = False) -> None:
     """Escucha datagramas hasta Ctrl+C, o solo uno si ``once`` es verdadero."""
 
+    tunnel = TunnelServer()
+    tunnel.create()
+
     with create_server_socket(host, port) as server_socket:
         bound_host, bound_port = server_socket.getsockname()
+
+        # El forwarder reenvía tráfico de vuelta al cliente correcto
+        # según la IP virtual de destino -- necesario con más de un
+        # cliente conectado a la vez. Necesita el socket ya creado,
+        # por eso se instancia aquí y no antes.
+        forwarder = TunnelServerForwarder(tunnel, server_socket)
+        threading.Thread(
+            target=forwarder.start,
+            daemon=True
+        ).start()
+
         print(f"Servidor UDP escuchando en {bound_host}:{bound_port}")
         print("Presiona Ctrl+C para detenerlo.")
 
         while True:
             try:
-                receive_and_reply(server_socket)
+                receive_and_reply(server_socket, tunnel)
             except socket.timeout:
                 continue
             if once:

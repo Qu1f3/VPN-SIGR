@@ -1,6 +1,13 @@
 from __future__ import annotations
+
+from dotenv import load_dotenv
+load_dotenv()
+
+#
+from tunneling.TUN import Adapter
+from client.client_tunnel import TunnelClient
+#
 from protocol.protocol import PacketType, create_packet, encode_packet, decode_packet
-from vpn_crypto.cipher import encrypt_packet_payload
 from vpn_crypto.handshake import (
     LAB_PSK,
     create_auth_tag,
@@ -10,6 +17,8 @@ from vpn_crypto.handshake import (
     verify_auth_tag,
 )
 import argparse
+import getpass
+import os
 import socket
 
 DEFAULT_HOST = "127.0.0.1"
@@ -18,7 +27,14 @@ DEFAULT_TIMEOUT_SECONDS = 3.0
 
 client_keys = generate_ephemeral_keypair()
 
-def send_message( host: str, port: int, message: str, timeout: float = DEFAULT_TIMEOUT_SECONDS,) -> str:
+def send_message(
+    host: str,
+    port: int,
+    message: str,
+    username: str,
+    password: str,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+) -> str:
     # Paquete de Handshake
     packet = create_packet(PacketType.HANDSHAKE, {"client_public_key": client_keys.public_key_bytes.hex()})
     payload = encode_packet(packet)
@@ -90,8 +106,8 @@ def send_message( host: str, port: int, message: str, timeout: float = DEFAULT_T
         auth_packet = create_packet(
             PacketType.AUTH,
             {
-                "username": "admin",
-                "password": "1234",
+                "username": username,
+                "password": password,
                 "client_auth_tag": client_auth_tag.hex()
             },
             session_id=session_id
@@ -113,52 +129,34 @@ def send_message( host: str, port: int, message: str, timeout: float = DEFAULT_T
             print("Autenticación fallida. No se puede enviar datos.")
             return
 
-    # Paquete de DATA
-    #DATA lleva bytes.
-    #encrypt_packet_payload() cifra esos bytes.
-    #encode_packet() serializa el packet cifrado.
-        data_packet = create_packet(
-            PacketType.DATA,
-            b"Hola desde el tunel VPN cifrado",
-            session_id=session_id,
-        )
-        
-        encrypted_data_packet = encrypt_packet_payload(
-            data_packet,
-            session_keys.client_to_server_key,
-        )
-        #Por ahora usamos TEMP_DATA_KEY Después lo cambiamos por: client_to_server_key y server_to_client_key
-        client_socket.sendto(
-            encode_packet(encrypted_data_packet),
-            (host, port)
+        print("Creando interfaz TUN...")
+
+        adapter = Adapter()
+
+        adapter.create(
+            name="VPN-SIGR",
         )
 
-        data_response, _ = client_socket.recvfrom(65535)
+        # El cliente solo necesita su propia IP virtual — no maneja un
+        # pool de otros peers, así que /32 (default) es correcto aquí.
+        adapter.set_ip(virtual_ip)
 
-        print("\nRespuesta DATA: ")
-        print(decode_packet(data_response))
+        adapter.start_session()
 
-        disconnect_packet = create_packet(
-            PacketType.DISCONNECT,
-            {},
-            session_id=session_id
+        print("TUN listo. Esperando trafico")
+
+        tunnel = TunnelClient(
+            adapter,
+            client_socket,
+            (host, port),
+            session_id,
+            session_keys.client_to_server_key
         )
 
-        client_socket.sendto(
-            encode_packet(disconnect_packet),
-            (host, port)
-        )
-
-        try:
-            disconnect_response, _ = client_socket.recvfrom(65535)
-
-            print("\nRespuesta DISCONNECT:")
-            print(decode_packet(disconnect_response))
-
-        except socket.timeout:
-            print("No se recibió respuesta al DISCONNECT.")
-
-        return response_packet
+        # tunnel.start() corre el loop de lectura del TUN indefinidamente
+        # (hasta Ctrl+C) — es el bucle principal del cliente, no una
+        # llamada que "regresa" para seguir con más pasos después.
+        tunnel.start()
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Cliente UDP mínimo de la VPN")
@@ -175,12 +173,26 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_TIMEOUT_SECONDS,
         help="Segundos máximos de espera por la respuesta",
     )
+    parser.add_argument(
+        "--username",
+        default=os.environ.get("VPN_USERNAME"),
+        help="Usuario (o usa la variable de entorno VPN_USERNAME)",
+    )
+    parser.add_argument(
+        "--password",
+        default=os.environ.get("VPN_PASSWORD"),
+        help="Contraseña (o usa VPN_PASSWORD; si se omite, se pide de forma oculta)",
+    )
     return parser.parse_args()
 
 def main() -> None:
     args = parse_args()
+
+    username = args.username or input("Usuario: ")
+    password = args.password or getpass.getpass("Contraseña: ")
+
     try:
-        send_message(args.host, args.port, args.message, args.timeout)
+        send_message(args.host, args.port, args.message, username, password, args.timeout)
     except socket.timeout:
         raise SystemExit(
             "Tiempo de espera agotado: verifica que el servidor esté encendido, "
