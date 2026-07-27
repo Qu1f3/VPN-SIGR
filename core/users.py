@@ -71,17 +71,54 @@ def generate_user_entry(password: str):
     return salt.hex(), hashed.hex()
 
 
+def _write_env_line(path: str, key: str, full_line: str):
+    """
+    Reemplaza (o agrega) la línea 'key=...' dentro del archivo .env en
+    'path', sin tocar el resto de las líneas. Crea el archivo si no
+    existe.
+    """
+    lines = []
+    found = False
+
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith(f"{key}="):
+                    lines.append(full_line + "\n")
+                    found = True
+                else:
+                    lines.append(line)
+
+    if not found:
+        lines.append(full_line + "\n")
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+
+
 if __name__ == "__main__":
     from dotenv import load_dotenv
     load_dotenv()
 
-    import sys
+    import argparse
 
-    if len(sys.argv) != 3:
-        print("Uso: python -m core.users <username> <password>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Genera (y opcionalmente guarda) una entrada de usuario para VPN_USERS_JSON."
+    )
+    parser.add_argument("username")
+    parser.add_argument("password")
+    parser.add_argument(
+        "--write",
+        metavar="ARCHIVO_ENV",
+        help=(
+            "Escribe/actualiza VPN_USERS_JSON directamente en este archivo "
+            "(ej. --write .env) -- útil si no puedes copiar/pegar o escribir "
+            "llaves { } en la terminal (ej. teclado de consola de VM)."
+        ),
+    )
+    args = parser.parse_args()
 
-    username, password = sys.argv[1], sys.argv[2]
+    username, password = args.username, args.password
     salt_hex, hash_hex = generate_user_entry(password)
 
     existing = {}
@@ -90,5 +127,11 @@ if __name__ == "__main__":
 
     existing[username] = {"salt": salt_hex, "hash": hash_hex}
 
-    print("Agrega esto a tu .env como VPN_USERS_JSON (todo en una linea):")
-    print(json.dumps(existing))
+    new_line = f"VPN_USERS_JSON={json.dumps(existing)}"
+
+    if args.write:
+        _write_env_line(args.write, "VPN_USERS_JSON", new_line)
+        print(f"Usuario '{username}' guardado en {args.write}. No necesitas copiar/pegar nada más.")
+    else:
+        print("Agrega esto a tu .env como VPN_USERS_JSON (todo en una linea):")
+        print(new_line)
