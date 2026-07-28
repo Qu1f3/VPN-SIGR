@@ -5,7 +5,7 @@ load_dotenv()
 
 #
 from tunneling.TUN import Adapter
-from client.client_tunnel import TunnelClient
+from client.client_tunnel import TunnelClient, receive_loop
 #
 from protocol.protocol import PacketType, create_packet, encode_packet, decode_packet
 from vpn_crypto.handshake import (
@@ -20,6 +20,7 @@ import argparse
 import getpass
 import os
 import socket
+import threading
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 51820
@@ -160,6 +161,14 @@ def send_message(
                 session_id,
                 session_keys.client_to_server_key
             )
+
+            # Hilo aparte para las respuestas del servidor -- sin esto,
+            # solo funciona la mitad del túnel (salida, no entrada).
+            threading.Thread(
+                target=receive_loop,
+                args=(client_socket, session_keys.server_to_client_key, adapter),
+                daemon=True,
+            ).start()
 
             tunnel.start()
         finally:

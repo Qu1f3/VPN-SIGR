@@ -1,10 +1,47 @@
+import socket as socket_module
+
 from protocol.protocol import (
     PacketType,
     create_packet,
-    encode_packet
+    encode_packet,
+    decode_packet,
 )
 
-from vpn_crypto.cipher import encrypt_packet_payload
+from vpn_crypto.cipher import encrypt_packet_payload, decrypt_packet_payload
+
+
+def receive_loop(client_socket, session_key, adapter):
+    """
+    Escucha lo que el servidor reenvía, lo descifra, y lo inyecta al
+    TUN propio -- sin esto, el tráfico saliente llega al servidor y
+    genera respuesta, pero esa respuesta nunca vuelve al sistema
+    operativo del cliente (justo lo que hacía que "se fuera" el
+    internet con el túnel completo activado).
+
+    Corre esto en un hilo aparte, en paralelo a TunnelClient.start().
+    """
+    while True:
+        try:
+            data, _ = client_socket.recvfrom(65535)
+        except socket_module.timeout:
+            continue
+        except OSError:
+            return
+
+        try:
+            packet = decode_packet(data)
+        except Exception:
+            continue
+
+        if packet.get("type") != PacketType.DATA:
+            continue
+
+        try:
+            plaintext = decrypt_packet_payload(packet, session_key)
+        except Exception:
+            continue
+
+        adapter.write_packet(plaintext)
 
 
 class TunnelClient:
