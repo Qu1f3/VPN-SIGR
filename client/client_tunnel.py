@@ -29,26 +29,30 @@ class TunnelClient:
 
         print("Tunnel client iniciado.")
 
-        # read_loop() espera al evento de Windows en vez de hacer
-        # polling — el hilo no consume CPU mientras no hay tráfico.
-        for packet in self.adapter.read_loop():
+        try:
+            # read_loop() espera al evento de Windows en vez de hacer
+            # polling — el hilo no consume CPU mientras no hay tráfico.
+            for packet in self.adapter.read_loop():
 
-            print(
-                f"Paquete capturado del TUN: {len(packet)} bytes"
-            )
+                print(
+                    f"Paquete capturado del TUN: {len(packet)} bytes"
+                )
 
-            vpn_packet = create_packet(
-                PacketType.DATA,
-                packet,
-                session_id=self.session_id
-            )
+                vpn_packet = create_packet(
+                    PacketType.DATA,
+                    packet,
+                    session_id=self.session_id
+                )
 
-            encrypted_packet = encrypt_packet_payload(
-                vpn_packet,
-                self.session_key
-            )
+                encrypted_packet = encrypt_packet_payload(
+                    vpn_packet,
+                    self.session_key
+                )
 
-            self.socket.sendto(
-                encode_packet(encrypted_packet),
-                self.server_address
-            )
+                self.socket.sendto(
+                    encode_packet(encrypted_packet),
+                    self.server_address
+                )
+
+        except KeyboardInterrupt:
+            return

@@ -6,6 +6,7 @@ load_dotenv()
 #
 from tunneling.TUN import Adapter
 from client.client_tunnel import TunnelClient
+from client.watchdog import client_kill_switch, ClientWatchdog
 #
 from protocol.protocol import PacketType, create_packet, encode_packet, decode_packet
 from vpn_crypto.handshake import (
@@ -153,10 +154,42 @@ def send_message(
             session_keys.client_to_server_key
         )
 
-        # tunnel.start() corre el loop de lectura del TUN indefinidamente
-        # (hasta Ctrl+C) — es el bucle principal del cliente, no una
-        # llamada que "regresa" para seguir con más pasos después.
-        tunnel.start()
+        # A partir de aquí ya hay túnel: activamos el Kill Switch real.
+        # configure() le dice al firewall qué NO bloquear (el propio
+        # servidor VPN, para poder reconectar, y el tráfico que ya sale
+        # por la IP virtual del túnel).
+        client_kill_switch.configure(
+            server_host=host,
+            server_port=port,
+            tun_interface="VPN-SIGR",
+            client_virtual_ip=virtual_ip,
+        )
+        watchdog = ClientWatchdog(host, port)
+
+        client_kill_switch.enable()
+
+        watchdog.start()
+
+        try:
+            tunnel.start()
+
+        except KeyboardInterrupt:
+            pass
+
+        finally:
+            print("\nCerrando cliente VPN...")
+
+            watchdog.stop()
+
+            adapter.stop()
+
+            adapter.close()
+
+            client_socket.close()
+
+            client_kill_switch.disable()
+
+            print("Cliente VPN detenido.")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Cliente UDP mínimo de la VPN")
@@ -200,6 +233,8 @@ def main() -> None:
         )
     except OSError as error:
         raise SystemExit(f"No se pudo usar el socket UDP: {error}") from error
-
+    finally:
+        client_kill_switch.disable()
+        
 if __name__ == "__main__":
     main()

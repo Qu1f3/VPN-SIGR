@@ -1,0 +1,115 @@
+"""
+Kill Switch automático del lado del CLIENTE.
+
+Corre en un hilo de fondo mientras el túnel está activo. Cada
+`check_interval` segundos manda un datagrama de sondeo al servidor VPN
+y espera respuesta. No hace falta un paquete de PING/PONG nuevo en el
+protocolo: el servidor, en `receive_and_reply` (server/server.py),
+responde con un paquete ERROR a cualquier datagrama que no logre
+decodificar -- así que un byte cualquiera ya sirve como heartbeat. Si
+el servidor está realmente caído o no hay internet, no llega ninguna
+respuesta y el socket revienta por timeout.
+
+- Sin respuesta `fail_threshold` veces seguidas -> se asume la VPN
+  caída -> se activa el bloqueo real (nadie navega sin protección).
+- Vuelve a responder -> se restaura el tráfico automáticamente.
+"""
+from __future__ import annotations
+
+import socket
+import threading
+import time
+
+from firewall.killswitch import KillSwitch
+from protocol.protocol import PacketType, create_packet, encode_packet, decode_packet
+
+# Instancia SEPARADA de la que usa el servidor/API -- esta sí bloquea
+# de verdad, porque corre en la máquina del usuario que navega por la VPN.
+client_kill_switch = KillSwitch(real_enforcement=True)
+
+
+class ClientWatchdog:
+
+    def __init__(
+        self,
+        server_host: str,
+        server_port: int,
+        check_interval: float = 2.0,
+        probe_timeout: float = 1.5,
+        fail_threshold: int = 2,
+    ):
+        self.server_host = server_host
+        self.server_port = server_port
+        self.check_interval = check_interval
+        self.probe_timeout = probe_timeout
+        self.fail_threshold = fail_threshold
+
+        self._stop_event = threading.Event()
+        self._consecutive_failures = 0
+        self._thread: threading.Thread | None = None
+
+    def _server_reachable(self) -> bool:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+
+                probe.settimeout(self.probe_timeout)
+
+                ping = create_packet(
+                    PacketType.PING,
+                    {"heartbeat": True},
+                )
+
+                probe.sendto(
+                    encode_packet(ping),
+                    (self.server_host, self.server_port),
+                )
+
+                response, _ = probe.recvfrom(2048)
+
+                packet = decode_packet(response)
+
+                return packet["type"] == PacketType.PONG
+
+        except Exception:
+            return False
+
+    def _loop(self) -> None:
+        while not self._stop_event.is_set():
+            reachable = self._server_reachable()
+
+            if reachable:
+                self._consecutive_failures = 0
+                if client_kill_switch.is_blocking():
+                    client_kill_switch.allow_traffic()
+                    print("[KillSwitch] Conexión restablecida. Tráfico permitido de nuevo.")
+
+            else:
+                self._consecutive_failures += 1
+
+                if (
+                    self._consecutive_failures >= self.fail_threshold
+                    and not client_kill_switch.is_blocking()
+                ):
+                    client_kill_switch.block_traffic()
+                    print(
+                        "[KillSwitch] Se perdió la conexión con el servidor VPN "
+                        "(o el internet). Bloqueando todo el tráfico saliente."
+                    )
+
+            if self._stop_event.wait(self.check_interval):
+                break
+
+    def start(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+        if self._thread is not None:
+            self._thread.join()
+
+        client_kill_switch.disable()

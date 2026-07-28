@@ -15,6 +15,10 @@ import json
 import os
 import secrets
 
+from pathlib import Path
+
+ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+
 _PBKDF2_ITERATIONS = 200_000
 
 
@@ -45,6 +49,47 @@ def _get_users():
     if _users_cache is None:
         _users_cache = _load_users_from_env()
     return _users_cache
+
+
+
+def create_user(username: str, password: str):
+    users = _get_users()
+
+    if username in users:
+        raise ValueError("El usuario ya existe.")
+
+    salt_hex, hash_hex = generate_user_entry(password)
+
+    users[username] = {
+        "salt": salt_hex,
+        "hash": hash_hex
+    }
+
+    new_line = f"VPN_USERS_JSON={json.dumps(users)}"
+
+    _write_env_line(str(ENV_FILE), "VPN_USERS_JSON", new_line)
+
+    global _users_cache
+    _users_cache = users
+
+
+def delete_user(username: str):
+    users = _get_users()
+
+    if username not in users:
+        raise ValueError("El usuario no existe.")
+
+    if username == "admin":
+        raise ValueError("No se puede eliminar el usuario administrador.")
+
+    del users[username]
+
+    new_line = f"VPN_USERS_JSON={json.dumps(users)}"
+
+    _write_env_line(str(ENV_FILE), "VPN_USERS_JSON", new_line)
+
+    global _users_cache
+    _users_cache = users
 
 
 def verify_credentials(username: str, password: str) -> bool:
@@ -94,6 +139,14 @@ def _write_env_line(path: str, key: str, full_line: str):
 
     with open(path, "w", encoding="utf-8") as f:
         f.writelines(lines)
+
+
+
+def get_users():
+    """
+    Devuelve todos los usuarios cargados desde VPN_USERS_JSON.
+    """
+    return _get_users()
 
 
 if __name__ == "__main__":

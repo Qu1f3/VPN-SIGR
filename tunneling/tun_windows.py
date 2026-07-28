@@ -19,6 +19,7 @@ class Adapter:
         self.prefix_length = None
         self.pool_prefix = None
         self.nat_name = None
+        self.running = True
 
     def create(self, name="VPN-SIGR", tunnel_type="VPN"):
         self.handle = wintun.WintunCreateAdapter(
@@ -124,13 +125,11 @@ class Adapter:
         self.nat_name = nat_name
 
     def start_session(self, capacity=WINTUN_MIN_RING_CAPACITY):
-        """
-        Debe llamarse después de create(). 'capacity' es el tamaño del
-        ring buffer en bytes; tiene que ser potencia de 2 entre
-        WINTUN_MIN_RING_CAPACITY y WINTUN_MAX_RING_CAPACITY.
-        """
+
         if not self.handle:
             raise RuntimeError("Primero debes llamar a create().")
+
+        self.running = True
 
         self.session = wintun.WintunStartSession(self.handle, capacity)
 
@@ -150,41 +149,35 @@ class Adapter:
         if not self.session:
             raise RuntimeError("Primero debes llamar a start_session().")
         return wintun.WintunGetReadWaitEvent(self.session)
-
     def wait_for_packet(self, timeout_ms=sync.INFINITE) -> bool:
-        """
-        Bloquea eficientemente (CPU ~0%) hasta que haya al menos un
-        paquete disponible, o hasta que pase timeout_ms.
-        Devuelve True si hay datos, False si fue timeout.
-        """
         event_handle = self.get_read_wait_event()
-        return sync.wait(event_handle, timeout_ms)
 
-    def read_loop(self, timeout_ms=sync.INFINITE):
-        """
-        Generador que entrega paquetes a medida que llegan, sin hacer
-        polling. Espera al evento de lectura y luego drena TODOS los
-        paquetes disponibles antes de volver a esperar, porque Wintun
-        puede acumular varios paquetes entre una señal del evento y la
-        siguiente.
+        try:
+            return sync.wait(event_handle, timeout_ms)
 
-        Si pasas un timeout_ms finito, cuando no llega nada a tiempo el
-        generador entrega 'None' (en vez de bloquear para siempre) para
-        que el consumidor pueda decidir qué hacer — por ejemplo, revisar
-        su propio deadline total y salir del for con 'break'.
-        Con timeout_ms=sync.INFINITE (default) nunca se entrega None.
-        """
-        while True:
+        except KeyboardInterrupt:
+            self.running = False
+            return False
+
+    def read_loop(self, timeout_ms=500):
+
+        while self.running:
+
             got_signal = self.wait_for_packet(timeout_ms)
 
+            if not self.running:
+                break
+
             if not got_signal:
-                yield None
                 continue
 
-            while True:
+            while self.running:
+
                 packet = self.read_packet()
+
                 if packet is None:
                     break
+
                 yield packet
 
     def read_packet(self):
@@ -239,6 +232,10 @@ class Adapter:
         if self.handle:
             wintun.WintunCloseAdapter(self.handle)
             self.handle = None
+
+
+    def stop(self):
+        self.running = False
 
     def __enter__(self):
         return self

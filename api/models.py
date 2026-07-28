@@ -60,3 +60,13 @@ class MessageResponse(BaseModel):
     """
 
     message: str
+
+class LogResponse(BaseModel):
+    """
+    Registro de eventos del servidor VPN.
+    """
+
+    timestamp: str
+    level: str
+    event: str
+    detail: str

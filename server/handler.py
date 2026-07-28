@@ -23,6 +23,7 @@ from vpn_crypto.handshake import (
 )
 from core.ip_manager import assign_ip
 from core.users import verify_credentials
+from core.logger import add_log
 
 from cryptography.exceptions import InvalidTag
 from vpn_crypto.cipher import decrypt_packet_payload
@@ -30,7 +31,9 @@ from vpn_crypto.cipher import decrypt_packet_payload
 def handle_packet(packet, client_address, tunnel):
     #Procesa los paquetes recibidos por el servidor VPN.
     packet_type = packet.get("type")
-    print(f"[HANDLER] Procesando: {packet_type}")
+
+    if packet_type != PacketType.PING:
+        print(f"[HANDLER] Procesando: {packet_type}")
 
     if packet_type == PacketType.HANDSHAKE:
         return handle_handshake(packet, client_address)
@@ -40,6 +43,15 @@ def handle_packet(packet, client_address, tunnel):
     
     elif packet_type == PacketType.AUTH:
         return handle_auth(packet, client_address)
+
+    elif packet_type == PacketType.PING:
+        return create_packet(
+            PacketType.PONG,
+            {
+                "alive": True
+            },
+            session_id=packet.get("session_id")
+        )
 
     elif packet_type == PacketType.DISCONNECT:
         return handle_disconnect(packet, client_address)
@@ -115,6 +127,12 @@ def handle_handshake(packet, client_address):
     print(f"[SESSION] Creada: {session_id}")
     print(f"[SESSION SIZE]: {len(session_id)} bytes")
     print(f"[IP] asignada: {virtual_ip}")
+
+    add_log(
+        "INFO",
+        "SESSION_CREATED",
+        f"Sesión {session_id} creada con IP {virtual_ip}"
+    )
 
     return create_packet(
 
@@ -218,14 +236,15 @@ def handle_disconnect(packet, client_address):
 
     if remove_session(session_id):
         print(f"[SESSION] Eliminada: {session_id}")
+        add_log(
+            "INFO",
+            "SESSION_CLOSED",
+            f"Sesión {session_id} finalizada."
+        )
     else:
         print(f"[SESSION] No encontrada: {session_id}")
 
-    kill_switch.enable()
-    kill_switch.block_traffic()
-
     print(f"[DISCONNECT] Cliente {client_address}")
-    print(f"[SESSION] Eliminada: {session_id}")
 
     return create_packet(
         PacketType.DISCONNECT,
@@ -299,6 +318,11 @@ def handle_auth(packet, client_address):
         kill_switch.disable()
 
         print(f"[AUTH] Usuario autenticado: {username}")
+        add_log(
+            "INFO",
+            "AUTH_SUCCESS",
+            f"Usuario '{username}' autenticado correctamente."
+        )
 
         return create_packet(
             PacketType.AUTH_SUCCESS,
@@ -309,6 +333,11 @@ def handle_auth(packet, client_address):
         )
 
     print(f"[AUTH] Fallo de autenticacion: {username}")
+    add_log(
+        "WARNING",
+        "AUTH_FAILED",
+        f"Intento fallido del usuario '{username}'."
+    )
 
     return create_packet(
         PacketType.AUTH_FAILED,

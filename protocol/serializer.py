@@ -164,25 +164,33 @@ def serialize_packet(packet: dict) -> bytes:
 
 def deserialize_packet(data: bytes) -> dict:
 
-    index = 0
+    if not data:
+        raise ValueError("Paquete vacío")
 
+    # Tamaño mínimo:
+    # versión(1) + tamaño_tipo(1) + session_id(16) + sequence(8) + nonce(12)
+    if len(data) < 38:
+        raise ValueError("Paquete demasiado pequeño")
+
+    index = 0
 
     # VERSION (1 byte)
     version = data[index]
     index += 1
 
-
     # TIPO DE PAQUETE
     packet_type_size = data[index]
     index += 1
 
+    # Validar que existan suficientes bytes para el tipo
+    if len(data) < index + packet_type_size + SESSION_ID_SIZE + SEQUENCE_NUMBER_SIZE + NONCE_SIZE:
+        raise ValueError("Paquete incompleto")
 
     packet_type = data[
         index:index + packet_type_size
     ].decode("utf-8")
 
     index += packet_type_size
-
 
     # SESSION ID (16 bytes)
     session_id = deserialize_session_id(
@@ -193,7 +201,6 @@ def deserialize_packet(data: bytes) -> dict:
 
     index += SESSION_ID_SIZE
 
-
     # SEQUENCE NUMBER (8 bytes)
     sequence_number = deserialize_sequence_number(
         data[
@@ -203,7 +210,6 @@ def deserialize_packet(data: bytes) -> dict:
 
     index += SEQUENCE_NUMBER_SIZE
 
-
     # NONCE (12 bytes)
     nonce = data[
         index:index + NONCE_SIZE
@@ -211,10 +217,8 @@ def deserialize_packet(data: bytes) -> dict:
 
     index += NONCE_SIZE
 
-
-    # Todo lo que queda es payload
+    # Payload
     payload_bytes = data[index:]
-
 
     if payload_bytes:
         try:
@@ -226,7 +230,6 @@ def deserialize_packet(data: bytes) -> dict:
     else:
         payload = {}
 
-
     return {
         "version": version,
         "type": packet_type,
@@ -235,7 +238,6 @@ def deserialize_packet(data: bytes) -> dict:
         "nonce": nonce,
         "payload": payload
     }
-
 
 
 def get_aad(packet: dict) -> bytes:

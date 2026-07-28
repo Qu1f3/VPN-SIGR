@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from api.models import (
     StatusResponse,
@@ -6,14 +6,19 @@ from api.models import (
     UserResponse,
     UserCreate,
     KillSwitchStatus,
-    MessageResponse
+    MessageResponse,
+    LogResponse
 )
 
-from core import session_manager
-from core.users import USERS
-from fastapi import HTTPException
+from core.users import (
+    get_users,
+    create_user as create_user_account,
+    delete_user as remove_user
+)
 from core import session_manager
 from firewall.killswitch import kill_switch
+from firewall.monitor import health_monitor
+from core.logger import get_logs
 
 # Creamos el router que contendrá todos los endpoints de la API
 router = APIRouter()
@@ -27,7 +32,7 @@ def get_status():
     sesiones = session_manager.list_sessions()
 
     return StatusResponse(
-        server="running",
+        server="running" if health_monitor.is_healthy else "degraded",
         udp_port=51820,
         active_clients=len(sesiones),
         ip_pool="10.8.0.0/24",
@@ -62,50 +67,57 @@ def get_sessions():
 
 
 @router.get("/users", response_model=list[UserResponse])
-def get_users():
+def get_users_endpoint():
     """
     Devuelve la lista de usuarios registrados.
     """
 
+    users = get_users()
+
     return [
         UserResponse(username=username)
-        for username in USERS.keys()
+        for username in users.keys()
     ]
 
 
 @router.post("/users", response_model=UserResponse)
 def create_user(user: UserCreate):
-    """
-    Agrega un nuevo usuario.
-    """
 
-    if user.username in USERS:
-        raise HTTPException(
-            status_code=400,
-            detail="El usuario ya existe."
+    try:
+
+        create_user_account(
+            user.username,
+            user.password
         )
 
-    USERS[user.username] = user.password
+        return UserResponse(
+            username=user.username
+        )
 
-    return UserResponse(username=user.username)
+    except ValueError as e:
 
-@router.delete("/users/{username}")
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
+    
+@router.delete("/users/{username}", response_model=MessageResponse)
 def delete_user(username: str):
     """
     Elimina un usuario.
     """
+    try:
+        remove_user(username)
 
-    if username not in USERS:
-        raise HTTPException(
-            status_code=404,
-            detail="Usuario no encontrado."
+        return MessageResponse(
+            message="Usuario eliminado correctamente."
         )
 
-    del USERS[username]
-
-    return {
-        "message": f"Usuario '{username}' eliminado correctamente."
-    }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
 
 
 
@@ -175,4 +187,25 @@ def allow_traffic():
         message="Tráfico permitido."
     )
 
+
+@router.get(
+    "/logs",
+    response_model=list[LogResponse]
+)
+def get_server_logs():
+    """
+    Devuelve los eventos registrados por el servidor VPN.
+    """
+
+    logs = get_logs()
+
+    return [
+        LogResponse(
+            timestamp=log["timestamp"],
+            level=log["level"],
+            event=log["event"],
+            detail=log["detail"]
+        )
+        for log in logs
+    ]
 
