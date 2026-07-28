@@ -19,6 +19,9 @@ class Adapter:
         self.prefix_length = None
         self.pool_prefix = None
         self.nat_name = None
+        self._full_tunnel_enabled = False
+        self._dns_configured = False
+        self._vpn_server_ip = None
 
     def create(self, name="VPN-SIGR", tunnel_type="VPN"):
         self.handle = wintun.WintunCreateAdapter(
@@ -122,6 +125,53 @@ class Adapter:
         network.create_nat(nat_name, internal_prefix)
 
         self.nat_name = nat_name
+
+    def enable_full_tunnel(self, server_ip: str, dns_servers: list = None):
+        """
+        Redirige TODO el tráfico del sistema por este túnel (cliente).
+        'server_ip' es la IP real del servidor VPN al que este cliente
+        está conectado -- necesaria para excluirla del túnel y evitar
+        un loop de enrutamiento (el tráfico cifrado hacia el servidor
+        debe seguir saliendo por la ruta original, no por el túnel que
+        depende de ese mismo tráfico).
+
+        'dns_servers' es opcional -- una lista de IPs (ej.
+        ["1.1.1.1", "1.0.0.1"]). Sin esto, las consultas DNS pueden
+        seguir filtrándose por fuera del túnel aunque el resto del
+        tráfico ya vaya cifrado.
+        """
+        if not self.name:
+            raise RuntimeError("Primero debes llamar a create().")
+
+        gateway_ip, original_interface = network.get_default_gateway()
+
+        network.pin_route_to_gateway(server_ip, gateway_ip, original_interface)
+        network.enable_full_tunnel(self.name)
+
+        self._vpn_server_ip = server_ip
+        self._full_tunnel_enabled = True
+
+        if dns_servers:
+            network.set_dns(self.name, dns_servers)
+            self._dns_configured = True
+
+    def disable_full_tunnel(self):
+        """
+        Restaura el enrutamiento normal. Se llama automáticamente desde
+        close() -- no deberías necesitar llamarlo a mano salvo que
+        quieras desactivar el túnel completo sin cerrar el adaptador.
+        """
+        if self._full_tunnel_enabled and self.name:
+            network.disable_full_tunnel(self.name)
+            self._full_tunnel_enabled = False
+
+        if self._dns_configured and self.name:
+            network.reset_dns(self.name)
+            self._dns_configured = False
+
+        if self._vpn_server_ip:
+            network.remove_route(self._vpn_server_ip)
+            self._vpn_server_ip = None
 
     def start_session(self, capacity=WINTUN_MIN_RING_CAPACITY):
         """
@@ -230,6 +280,8 @@ class Adapter:
         return True
 
     def close(self):
+        self.disable_full_tunnel()
+
         if self.nat_name:
             network.remove_nat(self.nat_name)
             self.nat_name = None

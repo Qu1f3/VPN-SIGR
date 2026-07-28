@@ -133,30 +133,40 @@ def send_message(
 
         adapter = Adapter()
 
-        adapter.create(
-            name="VPN-SIGR",
-        )
+        try:
+            adapter.create(
+                name="VPN-SIGR",
+            )
 
-        # El cliente solo necesita su propia IP virtual — no maneja un
-        # pool de otros peers, así que /32 (default) es correcto aquí.
-        adapter.set_ip(virtual_ip)
+            # El cliente solo necesita su propia IP virtual — no maneja un
+            # pool de otros peers, así que /32 (default) es correcto aquí.
+            adapter.set_ip(virtual_ip)
 
-        adapter.start_session()
+            adapter.start_session()
 
-        print("TUN listo. Esperando trafico")
+            print("TUN listo.")
 
-        tunnel = TunnelClient(
-            adapter,
-            client_socket,
-            (host, port),
-            session_id,
-            session_keys.client_to_server_key
-        )
+            # Redirige TODO el tráfico del sistema por el túnel. 'host' es
+            # la IP real del servidor VPN -- necesaria para no enrutarla
+            # también por el túnel (evita el loop de enrutamiento).
+            # DNS de Cloudflare por defecto; cámbialo si prefieres otro.
+            adapter.enable_full_tunnel(host, dns_servers=["1.1.1.1", "1.0.0.1"])
+            print("Túnel completo activado — todo tu tráfico ahora pasa por la VPN.")
 
-        # tunnel.start() corre el loop de lectura del TUN indefinidamente
-        # (hasta Ctrl+C) — es el bucle principal del cliente, no una
-        # llamada que "regresa" para seguir con más pasos después.
-        tunnel.start()
+            tunnel = TunnelClient(
+                adapter,
+                client_socket,
+                (host, port),
+                session_id,
+                session_keys.client_to_server_key
+            )
+
+            tunnel.start()
+        finally:
+            # SIEMPRE se ejecuta, incluso con Ctrl+C -- sin esto, el
+            # usuario se queda sin internet hasta arreglarlo a mano.
+            print("Restaurando enrutamiento normal...")
+            adapter.close()
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Cliente UDP mínimo de la VPN")
