@@ -18,10 +18,8 @@ from __future__ import annotations
 
 import socket
 import threading
-import time
 
 from firewall.killswitch import KillSwitch
-from protocol.protocol import PacketType, create_packet, encode_packet, decode_packet
 
 # Instancia SEPARADA de la que usa el servidor/API -- esta sí bloquea
 # de verdad, porque corre en la máquina del usuario que navega por la VPN.
@@ -49,26 +47,20 @@ class ClientWatchdog:
         self._thread: threading.Thread | None = None
 
     def _server_reachable(self) -> bool:
+        """
+        Manda un byte cualquiera -- no necesita ser un paquete válido
+        del protocolo. El servidor va a fallar al decodificarlo y va a
+        responder con un ERROR (ver receive_and_reply), pero esa
+        respuesta en sí ya es la confirmación de que el proceso sigue
+        vivo y alcanzable. No nos importa el CONTENIDO de la
+        respuesta, solo que haya llegado alguna antes del timeout.
+        """
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
-
                 probe.settimeout(self.probe_timeout)
-
-                ping = create_packet(
-                    PacketType.PING,
-                    {"heartbeat": True},
-                )
-
-                probe.sendto(
-                    encode_packet(ping),
-                    (self.server_host, self.server_port),
-                )
-
-                response, _ = probe.recvfrom(2048)
-
-                packet = decode_packet(response)
-
-                return packet["type"] == PacketType.PONG
+                probe.sendto(b"\x00", (self.server_host, self.server_port))
+                probe.recvfrom(2048)
+                return True
 
         except Exception:
             return False
