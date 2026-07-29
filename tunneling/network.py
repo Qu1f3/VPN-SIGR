@@ -178,3 +178,97 @@ def get_default_interface_name() -> str:
         )
 
     return interface_name
+
+
+def get_default_gateway():
+    """
+    Devuelve (gateway_ip, interface_alias) de la ruta por defecto
+    ACTUAL -- antes de activar el túnel completo. Se necesita para
+    poder seguir enrutando el propio tráfico cifrado hacia el servidor
+    VPN por la ruta original: sin esto, al activar el túnel completo
+    se genera un loop (el tráfico hacia el servidor terminaría
+    intentando salir por el túnel que depende de ese mismo tráfico).
+    """
+    result = _run_powershell(
+        "Get-NetRoute -DestinationPrefix '0.0.0.0/0' | "
+        "Sort-Object -Property RouteMetric | "
+        "Select-Object -First 1 | "
+        "ForEach-Object { \"$($_.NextHop)|$($_.InterfaceAlias)\" }"
+    )
+    output = result.stdout.strip()
+
+    if result.returncode != 0 or not output or "|" not in output:
+        raise RuntimeError("No se pudo detectar la puerta de enlace por defecto actual.")
+
+    gateway_ip, interface_alias = output.split("|", 1)
+    return gateway_ip, interface_alias
+
+
+def pin_route_to_gateway(destination_ip: str, gateway_ip: str, interface_alias: str):
+    """
+    Fuerza una ruta /32 hacia 'destination_ip' (ej. la IP real del
+    servidor VPN) a través de la puerta de enlace/interfaz ORIGINAL.
+    Debe llamarse ANTES de enable_full_tunnel() -- evita el loop de
+    enrutamiento.
+    """
+    _run_powershell(
+        f"New-NetRoute -DestinationPrefix '{destination_ip}/32' "
+        f"-InterfaceAlias '{interface_alias}' -NextHop '{gateway_ip}' "
+        f"-RouteMetric 1 -ErrorAction SilentlyContinue"
+    )
+
+
+def remove_route(destination_ip: str):
+    _run_powershell(
+        f"Remove-NetRoute -DestinationPrefix '{destination_ip}/32' "
+        f"-Confirm:$false -ErrorAction SilentlyContinue"
+    )
+
+
+def enable_full_tunnel(tun_interface_alias: str):
+    """
+    Redirige TODO el tráfico del sistema por el túnel, sin tocar (ni
+    entrar en conflicto de métricas con) la ruta por defecto original:
+    agrega dos rutas más específicas (0.0.0.0/1 y 128.0.0.0/1) que
+    cubren la totalidad del espacio de IPs y ganan por longest-prefix-
+    match sobre el 0.0.0.0/0 real -- la misma técnica que usan
+    OpenVPN/WireGuard para "redirect-gateway", y evita pelearte con
+    métricas de rutas.
+    """
+    for prefix in ("0.0.0.0/1", "128.0.0.0/1"):
+        result = _run_powershell(
+            f"New-NetRoute -DestinationPrefix '{prefix}' "
+            f"-InterfaceAlias '{tun_interface_alias}' -NextHop 0.0.0.0"
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"No se pudo agregar la ruta de túnel completo '{prefix}': "
+                f"{result.stderr.strip() or result.stdout.strip()}"
+            )
+
+
+def disable_full_tunnel(tun_interface_alias: str):
+    """Quita las rutas de túnel completo -- restaura el enrutamiento normal."""
+    for prefix in ("0.0.0.0/1", "128.0.0.0/1"):
+        _run_powershell(
+            f"Remove-NetRoute -DestinationPrefix '{prefix}' "
+            f"-InterfaceAlias '{tun_interface_alias}' -Confirm:$false -ErrorAction SilentlyContinue"
+        )
+
+
+def set_dns(interface_alias: str, dns_servers: list):
+    servers = ",".join(f"'{s}'" for s in dns_servers)
+    result = _run_powershell(
+        f"Set-DnsClientServerAddress -InterfaceAlias '{interface_alias}' -ServerAddresses ({servers})"
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"No se pudo configurar DNS: {result.stderr.strip() or result.stdout.strip()}"
+        )
+
+
+def reset_dns(interface_alias: str):
+    _run_powershell(
+        f"Set-DnsClientServerAddress -InterfaceAlias '{interface_alias}' "
+        f"-ResetServerAddresses -ErrorAction SilentlyContinue"
+    )
