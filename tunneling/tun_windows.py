@@ -1,4 +1,5 @@
 import ctypes
+import threading
 
 from tunneling.wintun import wintun, WINTUN_MIN_RING_CAPACITY
 from tunneling import network
@@ -22,6 +23,24 @@ class Adapter:
         self._full_tunnel_enabled = False
         self._dns_configured = False
         self._vpn_server_ip = None
+
+        # Protege el USO real de self.session (las llamadas que tocan
+        # las estructuras internas de Wintun: recibir/liberar/asignar/
+        # enviar paquete) contra que close() libere la sesión al mismo
+        # tiempo desde otro hilo. read_packet()/write_packet() corren
+        # en hilos distintos (TunnelClient.start() y receive_loop()
+        # respectivamente), y disconnect() puede llegar de un tercer
+        # hilo en cualquier momento -- sin este lock, un hilo puede
+        # terminar llamando a Wintun con una sesión que otro hilo ya
+        # liberó (use-after-free), lo que provoca access violations.
+        #
+        # OJO: este lock NO envuelve la espera de wait_for_packet() --
+        # esa espera debe seguir siendo interrumpible por
+        # WintunEndSession (así está pensado el driver), si la
+        # metiéramos dentro del lock, close() se quedaría esperando a
+        # que termine una espera que nunca se puede interrumpir por
+        # estar bloqueada por el propio lock que close() necesita.
+        self._session_lock = threading.Lock()
 
     def create(self, name="VPN-SIGR", tunnel_type="VPN"):
         self.handle = wintun.WintunCreateAdapter(
@@ -225,6 +244,12 @@ class Adapter:
         Con timeout_ms=sync.INFINITE (default) nunca se entrega None.
         """
         while True:
+            if self.session is None:
+                # close() ya corrió (disconnect() desde otro hilo) --
+                # no hay nada más que esperar, termina el generador
+                # con calma en vez de tronar en get_read_wait_event().
+                return
+
             got_signal = self.wait_for_packet(timeout_ms)
 
             if not got_signal:
@@ -245,18 +270,25 @@ class Adapter:
         Devuelve bytes, o None si no hay paquetes disponibles en este
         momento (no es un error).
         """
-        size = ctypes.c_uint32()
-        packet_ptr = wintun.WintunReceivePacket(self.session, ctypes.byref(size))
-
-        if not packet_ptr:
-            err = ctypes.get_last_error()
-            if err == ERROR_NO_MORE_ITEMS:
+        with self._session_lock:
+            session = self.session
+            if session is None:
+                # La sesión ya se cerró (disconnect() en curso en otro
+                # hilo) -- no hay nada que leer, no es un error.
                 return None
-            raise RuntimeError(f"Error leyendo paquete: {ctypes.WinError(err)}")
 
-        data = ctypes.string_at(packet_ptr, size.value)
-        wintun.WintunReleaseReceivePacket(self.session, packet_ptr)
-        return data
+            size = ctypes.c_uint32()
+            packet_ptr = wintun.WintunReceivePacket(session, ctypes.byref(size))
+
+            if not packet_ptr:
+                err = ctypes.get_last_error()
+                if err == ERROR_NO_MORE_ITEMS:
+                    return None
+                raise RuntimeError(f"Error leyendo paquete: {ctypes.WinError(err)}")
+
+            data = ctypes.string_at(packet_ptr, size.value)
+            wintun.WintunReleaseReceivePacket(session, packet_ptr)
+            return data
 
     def write_packet(self, data: bytes) -> bool:
         """
@@ -266,18 +298,28 @@ class Adapter:
         Devuelve False si el ring buffer está lleno (reintentar después),
         True si se envió correctamente.
         """
-        size = len(data)
-        packet_ptr = wintun.WintunAllocateSendPacket(self.session, size)
-
-        if not packet_ptr:
-            err = ctypes.get_last_error()
-            if err == ERROR_BUFFER_OVERFLOW:
+        with self._session_lock:
+            session = self.session
+            if session is None:
+                # La sesión ya se cerró (disconnect() en curso en otro
+                # hilo) -- no hay a dónde escribir. Antes esto seguía
+                # de largo y le pasaba None a WintunAllocateSendPacket,
+                # lo que terminaba en un access violation dentro de la
+                # DLL (use-after-free de la sesión).
                 return False
-            raise RuntimeError(f"Error asignando paquete de salida: {ctypes.WinError(err)}")
 
-        ctypes.memmove(packet_ptr, data, size)
-        wintun.WintunSendPacket(self.session, packet_ptr)
-        return True
+            size = len(data)
+            packet_ptr = wintun.WintunAllocateSendPacket(session, size)
+
+            if not packet_ptr:
+                err = ctypes.get_last_error()
+                if err == ERROR_BUFFER_OVERFLOW:
+                    return False
+                raise RuntimeError(f"Error asignando paquete de salida: {ctypes.WinError(err)}")
+
+            ctypes.memmove(packet_ptr, data, size)
+            wintun.WintunSendPacket(session, packet_ptr)
+            return True
 
     def close(self):
         self.disable_full_tunnel()
@@ -285,9 +327,10 @@ class Adapter:
         if self.nat_name:
             network.remove_nat(self.nat_name)
             self.nat_name = None
-        if self.session:
-            wintun.WintunEndSession(self.session)
-            self.session = None
+        with self._session_lock:
+            if self.session:
+                wintun.WintunEndSession(self.session)
+                self.session = None
         if self.handle:
             wintun.WintunCloseAdapter(self.handle)
             self.handle = None
