@@ -1,5 +1,6 @@
 from ctypes import *
 from pathlib import Path
+import sys
 
 WINTUN_ADAPTER_HANDLE = c_void_p
 WINTUN_SESSION_HANDLE = c_void_p
@@ -8,12 +9,14 @@ WINTUN_SESSION_HANDLE = c_void_p
 WINTUN_MIN_RING_CAPACITY = 0x20000     # 128 KiB
 WINTUN_MAX_RING_CAPACITY = 0x4000000   # 64 MiB
 
-DLL_PATH = (
-    Path(__file__)
-    .parent.parent
-    / "libs"
-    / "wintun.dll"
-)
+if getattr(sys, "frozen", False):
+    # Empaquetado con PyInstaller -- los archivos se extraen a una
+    # carpeta temporal (sys._MEIPASS) en vez de vivir junto al .py.
+    BASE_DIR = Path(sys._MEIPASS)
+else:
+    BASE_DIR = Path(__file__).parent.parent
+
+DLL_PATH = BASE_DIR / "libs" / "wintun.dll"
 
 # use_last_error=True es lo que permite luego usar ctypes.get_last_error()
 # para saber POR QUÉ falló una llamada (WinDLL por sí solo no te lo dice).
