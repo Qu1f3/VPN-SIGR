@@ -5,7 +5,7 @@ load_dotenv()
 
 #
 from tunneling.TUN import Adapter
-from client.client_tunnel import TunnelClient
+from client.client_tunnel import TunnelClient, receive_loop # <--- el ultimo agregado
 from client.watchdog import client_kill_switch, ClientWatchdog
 #
 from protocol.protocol import PacketType, create_packet, encode_packet, decode_packet
@@ -21,6 +21,9 @@ import argparse
 import getpass
 import os
 import socket
+#
+import threading
+#
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 51820
@@ -134,25 +137,47 @@ def send_message(
 
         adapter = Adapter()
 
-        adapter.create(
-            name="VPN-SIGR",
-        )
+        try: ########borrar este try en caso de error
+            adapter.create(
+                name="VPN-SIGR",
+            )
 
-        # El cliente solo necesita su propia IP virtual — no maneja un
-        # pool de otros peers, así que /32 (default) es correcto aquí.
-        adapter.set_ip(virtual_ip)
+            # El cliente solo necesita su propia IP virtual — no maneja un
+            # pool de otros peers, así que /32 (default) es correcto aquí.
+            adapter.set_ip(virtual_ip)
 
-        adapter.start_session()
+            adapter.start_session()
 
-        print("TUN listo. Esperando trafico")
+            print("TUN listo")
 
-        tunnel = TunnelClient(
-            adapter,
-            client_socket,
-            (host, port),
-            session_id,
-            session_keys.client_to_server_key
-        )
+            #########
+            adapter.enable_full_tunnel(host, dns_servers=["1.1.1.1", "1.0.0.1"])
+            print("Túnel completo activado — todo tu tráfico ahora pasa por la VPN.")
+            #########
+
+            tunnel = TunnelClient(
+                adapter,
+                client_socket,
+                (host, port),
+                session_id,
+                session_keys.client_to_server_key
+            )
+#################
+                # Hilo aparte para las respuestas del servidor -- sin esto,
+                # solo funciona la mitad del túnel (salida, no entrada).
+            threading.Thread(
+                    target=receive_loop,
+                    args=(client_socket, session_keys.server_to_client_key, adapter),
+                    daemon=True,
+            ).start()
+    
+            tunnel.start()
+        finally:
+            # SIEMPRE se ejecuta, incluso con Ctrl+C -- sin esto, el
+            # usuario se queda sin internet hasta arreglarlo a mano.
+            print("Restaurando enrutamiento normal...")
+            adapter.close()
+#####################
 
         # A partir de aquí ya hay túnel: activamos el Kill Switch real.
         # configure() le dice al firewall qué NO bloquear (el propio

@@ -333,6 +333,10 @@ def handle_auth(packet, client_address):
         )
 
     print(f"[AUTH] Fallo de autenticacion: {username}")
+
+    # Elimina la sesión creada durante el handshake
+    remove_session(session_id)
+
     add_log(
         "WARNING",
         "AUTH_FAILED",
