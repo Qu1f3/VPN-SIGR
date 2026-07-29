@@ -19,7 +19,9 @@ class Adapter:
         self.prefix_length = None
         self.pool_prefix = None
         self.nat_name = None
-        self.running = True
+        self._full_tunnel_enabled = False
+        self._dns_configured = False
+        self._vpn_server_ip = None
 
     def create(self, name="VPN-SIGR", tunnel_type="VPN"):
         self.handle = wintun.WintunCreateAdapter(
@@ -124,12 +126,61 @@ class Adapter:
 
         self.nat_name = nat_name
 
-    def start_session(self, capacity=WINTUN_MIN_RING_CAPACITY):
+    def enable_full_tunnel(self, server_ip: str, dns_servers: list = None):
+        """
+        Redirige TODO el tráfico del sistema por este túnel (cliente).
+        'server_ip' es la IP real del servidor VPN al que este cliente
+        está conectado -- necesaria para excluirla del túnel y evitar
+        un loop de enrutamiento (el tráfico cifrado hacia el servidor
+        debe seguir saliendo por la ruta original, no por el túnel que
+        depende de ese mismo tráfico).
 
-        if not self.handle:
+        'dns_servers' es opcional -- una lista de IPs (ej.
+        ["1.1.1.1", "1.0.0.1"]). Sin esto, las consultas DNS pueden
+        seguir filtrándose por fuera del túnel aunque el resto del
+        tráfico ya vaya cifrado.
+        """
+        if not self.name:
             raise RuntimeError("Primero debes llamar a create().")
 
-        self.running = True
+        gateway_ip, original_interface = network.get_default_gateway()
+
+        network.pin_route_to_gateway(server_ip, gateway_ip, original_interface)
+        network.enable_full_tunnel(self.name)
+
+        self._vpn_server_ip = server_ip
+        self._full_tunnel_enabled = True
+
+        if dns_servers:
+            network.set_dns(self.name, dns_servers)
+            self._dns_configured = True
+
+    def disable_full_tunnel(self):
+        """
+        Restaura el enrutamiento normal. Se llama automáticamente desde
+        close() -- no deberías necesitar llamarlo a mano salvo que
+        quieras desactivar el túnel completo sin cerrar el adaptador.
+        """
+        if self._full_tunnel_enabled and self.name:
+            network.disable_full_tunnel(self.name)
+            self._full_tunnel_enabled = False
+
+        if self._dns_configured and self.name:
+            network.reset_dns(self.name)
+            self._dns_configured = False
+
+        if self._vpn_server_ip:
+            network.remove_route(self._vpn_server_ip)
+            self._vpn_server_ip = None
+
+    def start_session(self, capacity=WINTUN_MIN_RING_CAPACITY):
+        """
+        Debe llamarse después de create(). 'capacity' es el tamaño del
+        ring buffer en bytes; tiene que ser potencia de 2 entre
+        WINTUN_MIN_RING_CAPACITY y WINTUN_MAX_RING_CAPACITY.
+        """
+        if not self.handle:
+            raise RuntimeError("Primero debes llamar a create().")
 
         self.session = wintun.WintunStartSession(self.handle, capacity)
 
@@ -149,35 +200,41 @@ class Adapter:
         if not self.session:
             raise RuntimeError("Primero debes llamar a start_session().")
         return wintun.WintunGetReadWaitEvent(self.session)
+
     def wait_for_packet(self, timeout_ms=sync.INFINITE) -> bool:
+        """
+        Bloquea eficientemente (CPU ~0%) hasta que haya al menos un
+        paquete disponible, o hasta que pase timeout_ms.
+        Devuelve True si hay datos, False si fue timeout.
+        """
         event_handle = self.get_read_wait_event()
+        return sync.wait(event_handle, timeout_ms)
 
-        try:
-            return sync.wait(event_handle, timeout_ms)
+    def read_loop(self, timeout_ms=sync.INFINITE):
+        """
+        Generador que entrega paquetes a medida que llegan, sin hacer
+        polling. Espera al evento de lectura y luego drena TODOS los
+        paquetes disponibles antes de volver a esperar, porque Wintun
+        puede acumular varios paquetes entre una señal del evento y la
+        siguiente.
 
-        except KeyboardInterrupt:
-            self.running = False
-            return False
-
-    def read_loop(self, timeout_ms=500):
-
-        while self.running:
-
+        Si pasas un timeout_ms finito, cuando no llega nada a tiempo el
+        generador entrega 'None' (en vez de bloquear para siempre) para
+        que el consumidor pueda decidir qué hacer — por ejemplo, revisar
+        su propio deadline total y salir del for con 'break'.
+        Con timeout_ms=sync.INFINITE (default) nunca se entrega None.
+        """
+        while True:
             got_signal = self.wait_for_packet(timeout_ms)
 
-            if not self.running:
-                break
-
             if not got_signal:
+                yield None
                 continue
 
-            while self.running:
-
+            while True:
                 packet = self.read_packet()
-
                 if packet is None:
                     break
-
                 yield packet
 
     def read_packet(self):
@@ -223,6 +280,8 @@ class Adapter:
         return True
 
     def close(self):
+        self.disable_full_tunnel()
+
         if self.nat_name:
             network.remove_nat(self.nat_name)
             self.nat_name = None
@@ -232,10 +291,6 @@ class Adapter:
         if self.handle:
             wintun.WintunCloseAdapter(self.handle)
             self.handle = None
-
-
-    def stop(self):
-        self.running = False
 
     def __enter__(self):
         return self
