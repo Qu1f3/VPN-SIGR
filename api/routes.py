@@ -121,71 +121,71 @@ def delete_user(username: str):
 
 
 
-@router.get(
-    "/killswitch",
-    response_model=KillSwitchStatus
-)
-def get_killswitch():
+# @router.get(
+#     "/killswitch",
+#     response_model=KillSwitchStatus
+# )
+# def get_killswitch():
 
-    estado = kill_switch.status()
+#     estado = kill_switch.status()
 
-    return KillSwitchStatus(
-        enabled=estado["enabled"],
-        blocking=estado["blocking"],
-        last_change=estado["last_change"]
-    )
-
-
-@router.post(
-    "/killswitch/enable",
-    response_model=MessageResponse
-)
-def enable_killswitch():
-
-    kill_switch.enable()
-
-    return MessageResponse(
-        message="Kill Switch activado correctamente."
-    )
+#     return KillSwitchStatus(
+#         enabled=estado["enabled"],
+#         blocking=estado["blocking"],
+#         last_change=estado["last_change"]
+#     )
 
 
-@router.post(
-    "/killswitch/disable",
-    response_model=MessageResponse
-)
-def disable_killswitch():
+# @router.post(
+#     "/killswitch/enable",
+#     response_model=MessageResponse
+# )
+# def enable_killswitch():
 
-    kill_switch.disable()
+#     kill_switch.enable()
 
-    return MessageResponse(
-        message="Kill Switch desactivado correctamente."
-    )
-
-
-@router.post(
-    "/killswitch/block",
-    response_model=MessageResponse
-)
-def block_traffic():
-
-    kill_switch.block_traffic()
-
-    return MessageResponse(
-        message="Tráfico bloqueado."
-    )
+#     return MessageResponse(
+#         message="Kill Switch activado correctamente."
+#     )
 
 
-@router.post(
-    "/killswitch/allow",
-    response_model=MessageResponse
-)
-def allow_traffic():
+# @router.post(
+#     "/killswitch/disable",
+#     response_model=MessageResponse
+# )
+# def disable_killswitch():
 
-    kill_switch.allow_traffic()
+#     kill_switch.disable()
 
-    return MessageResponse(
-        message="Tráfico permitido."
-    )
+#     return MessageResponse(
+#         message="Kill Switch desactivado correctamente."
+#     )
+
+
+# @router.post(
+#     "/killswitch/block",
+#     response_model=MessageResponse
+# )
+# def block_traffic():
+
+#     kill_switch.block_traffic()
+
+#     return MessageResponse(
+#         message="Tráfico bloqueado."
+#     )
+
+
+# @router.post(
+#     "/killswitch/allow",
+#     response_model=MessageResponse
+# )
+# def allow_traffic():
+
+#     kill_switch.allow_traffic()
+
+#     return MessageResponse(
+#         message="Tráfico permitido."
+#     )
 
 
 @router.get(

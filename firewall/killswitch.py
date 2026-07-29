@@ -183,11 +183,34 @@ def _windows_block(server_host, server_port, client_virtual_ip):
     # que no se cerró bien (p. ej. el proceso murió sin llamar disable()).
     _windows_allow()
 
-    # 1) Bloquea TODO el tráfico saliente.
+    # 1) Bloquea TODO el tráfico saliente -- pero NO con una regla
+    # explícita "action=block".
+    #
+    # Esto es LA CAUSA de que el Kill Switch no funcione: en Windows
+    # Firewall (WFP), una regla de BLOQUEO explícita siempre tiene
+    # prioridad sobre cualquier regla de PERMISO, sin importar qué
+    # tan específica sea esta última (así lo documenta Microsoft:
+    # "Explicit block rules take precedence over any conflicting
+    # allow rules" -- y esto aplica incluso si la regla de permiso
+    # es mucho más específica, como nuestras excepciones de
+    # servidor/loopback/túnel). Con la regla _BLOCK_OUT de antes,
+    # las tres excepciones de abajo quedaban bloqueadas TAMBIÉN --
+    # el cliente perdía el internet por completo y ni siquiera podía
+    # volver a hablarle al servidor VPN para reconectar, así que el
+    # Kill Switch se quedaba atascado bloqueando para siempre (el
+    # watchdog nunca podía confirmar que el servidor volvió a estar
+    # disponible, porque su propio paquete de sondeo también se
+    # bloqueaba).
+    #
+    # La forma correcta es cambiar la POLÍTICA POR DEFECTO del
+    # tráfico saliente a "bloquear" y dejar que las reglas de
+    # permiso (más específicas) actúen como excepción -- las reglas
+    # explícitas de permiso sí tienen prioridad sobre la política
+    # por defecto (misma documentación: "Explicitly defined allow
+    # rules take precedence over the default block setting").
     _run([
-        "netsh", "advfirewall", "firewall", "add", "rule",
-        f"name={KillSwitch.RULE_NAME}_BLOCK_OUT",
-        "dir=out", "action=block", "enable=yes", "profile=any",
+        "netsh", "advfirewall", "set", "allprofiles", "firewallpolicy",
+        "blockinbound,blockoutbound",
     ])
 
     # 2) Excepción: permitir hablarle al servidor VPN.
@@ -221,7 +244,14 @@ def _windows_block(server_host, server_port, client_virtual_ip):
 def _windows_allow():
     print("[KillSwitch] Eliminando reglas del firewall...")
 
-    for suffix in ("_BLOCK_OUT", "_ALLOW_SERVER", "_ALLOW_LOOPBACK", "_ALLOW_TUNNEL"):
+    # Restaura la política por defecto de salida (Windows la trae así
+    # de fábrica: entrada bloqueada, salida permitida).
+    _run([
+        "netsh", "advfirewall", "set", "allprofiles", "firewallpolicy",
+        "blockinbound,allowoutbound",
+    ])
+
+    for suffix in ("_ALLOW_SERVER", "_ALLOW_LOOPBACK", "_ALLOW_TUNNEL"):
         _run([
             "netsh", "advfirewall", "firewall", "delete", "rule",
             f"name={KillSwitch.RULE_NAME}{suffix}",
