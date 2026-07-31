@@ -69,8 +69,14 @@ class ClientWatchdog:
         while not self._stop_event.is_set():
             reachable = self._server_reachable()
 
+            # Si el usuario desconectó mientras esperábamos la respuesta,
+            # salimos sin tocar el firewall.
+            if self._stop_event.is_set():
+                break
+
             if reachable:
                 self._consecutive_failures = 0
+
                 if client_kill_switch.is_blocking():
                     client_kill_switch.allow_traffic()
                     print("[KillSwitch] Conexión restablecida. Tráfico permitido de nuevo.")
@@ -78,8 +84,13 @@ class ClientWatchdog:
             else:
                 self._consecutive_failures += 1
 
+                # Si ya se solicitó detener el watchdog, no bloquear.
+                if self._stop_event.is_set():
+                    break
+
                 if (
                     self._consecutive_failures >= self.fail_threshold
+                    and client_kill_switch.is_enabled()
                     and not client_kill_switch.is_blocking()
                 ):
                     client_kill_switch.block_traffic()
@@ -98,10 +109,17 @@ class ClientWatchdog:
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
-    def stop(self) -> None:
+    def stop(self):
+        print("[Watchdog] Deteniendo watchdog...")
+
         self._stop_event.set()
 
-        if self._thread is not None:
-            self._thread.join()
-
         client_kill_switch.disable()
+
+        if self._thread is not None and self._thread.is_alive():
+          self._thread.join(timeout=2)
+
+
+        self._thread = None
+
+        print("[Watchdog] Watchdog detenido.")

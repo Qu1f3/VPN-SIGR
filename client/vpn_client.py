@@ -165,13 +165,27 @@ class VPNClient:
             self._status("Desconectado.")
 
     def disconnect(self):
-        """
-        Llamar desde OTRO hilo mientras connect() está bloqueado en
-        tunnel.start(). Cerrar la sesión del adaptador hace que la
-        espera bloqueada dentro de read_loop() truene (WintunEndSession
-        está pensado justo para esto: cancelar una espera pendiente),
-        lo que hace que tunnel.start() termine y se dispare el
-        'finally' de connect() para limpiar todo lo demás.
-        """
+        print("[VPNClient] Iniciando desconexión...")
+
+        if not self.connected:
+            return
+
+        self.connected = False
+
+        if self.watchdog:
+            print("[VPNClient] Deteniendo watchdog...")
+            self.watchdog.stop()
+            self.watchdog = None
+
         if self.adapter:
+            print("[VPNClient] Cerrando adaptador...")
             self.adapter.close()
+
+        if self.client_socket:
+            print("[VPNClient] Cerrando socket...")
+            try:
+                self.client_socket.close()
+            except OSError:
+                pass
+
+        print("[VPNClient] Desconexión finalizada.")
