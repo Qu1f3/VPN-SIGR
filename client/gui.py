@@ -18,7 +18,7 @@ from tkinter import ttk, messagebox
 
 from client.vpn_client import VPNClient, DEFAULT_TIMEOUT_SECONDS
 
-DEFAULT_HOST = "127.0.0.1"
+DEFAULT_HOST = "159.223.105.96"
 DEFAULT_PORT = 51820
 
 
